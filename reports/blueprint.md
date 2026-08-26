@@ -1,99 +1,56 @@
 # CI/CD Blueprint: RAG Eval + Guardrail Stack
 
-**Sinh viên:** [Họ Tên]  
-**Ngày:** [Ngày làm lab]
+**Sinh viên:** Nguyễn Trọng Toàn  
+**Ngày chạy lab:** 2026-08-26
 
----
+## Guard Stack Pipeline
 
-## Guard Stack Architecture
+~~~text
+User input
+  -> Presidio PII scan (VN_CCCD, VN_PHONE, EMAIL)
+  -> NeMo input rail (jailbreak, prompt injection, off-topic, PII request)
+  -> Day 18 RAG pipeline (chunk, search, rerank, answer)
+  -> NeMo output rail (sensitive output check)
+  -> Safe response
+~~~
 
-```
-User Input
-    │
-    ▼ (~?ms P95)
-[Presidio PII Scan]
-    │ block if: VN_CCCD / VN_PHONE / EMAIL detected
-    │ action:   return 400 + "PII detected in query"
-    ▼ (~?ms P95)
-[NeMo Input Rail]
-    │ block if: off-topic / jailbreak / prompt injection
-    │ action:   return 503 + refuse message
-    ▼
-[RAG Pipeline (Day 18)]
-    │ M1 Chunk → M2 Search → M3 Rerank → GPT-4o-mini
-    ▼
-[NeMo Output Rail]
-    │ flag if:  PII in response / sensitive content
-    │ action:   replace with safe response
-    ▼
-User Response
-```
+| Layer | Tool | P95 đo được | Failure action |
+|---|---|---:|---|
+| PII detection | Presidio + custom VN recognizers | 0.03 ms | Reject and log |
+| Topic/jailbreak | NeMo input rail + deterministic pre-check | 0.03 ms | Reject with reason |
+| RAG pipeline | Day 18-compatible pipeline | Not measured in guard benchmark | Fallback |
+| Output check | NeMo output rail + PII check | Covered by output guard | Block and log |
+| Total guard | Presidio + input rail | 0.06 ms | CI gate if over 500 ms |
 
----
+## CI Gates
 
-## Latency Budget
+- RAGAS faithfulness must be at least 0.75 on the 50-question set.
+- Adversarial suite must pass at least 18/20 cases.
+- Total guard P95 must remain below 500 ms.
+- pytest tests/ -q must pass before merging to main.
 
-*(Điền từ kết quả Task 12 — measure_p95_latency())*
+Example workflow commands:
 
-| Layer | P50 (ms) | P95 (ms) | P99 (ms) | Budget |
-|---|---|---|---|---|
-| Presidio PII | ? | ? | ? | <10ms |
-| NeMo Input Rail | ? | ? | ? | <300ms |
-| RAG Pipeline | ? | ? | ? | <2000ms |
-| NeMo Output Rail | ? | ? | ? | <300ms |
-| **Total Guard** | ? | **?** | ? | **<500ms** |
+~~~yaml
+- run: python src/phase_a_ragas.py
+- run: python src/phase_b_judge.py
+- run: python src/phase_c_guard.py
+- run: pytest tests/ -q
+~~~
 
-**Budget OK?** [ ] Yes / [ ] No  
-**Comment:** [Nếu vượt budget, layer nào là bottleneck và cách tối ưu?]
+## Monitoring Results
 
----
+| Metric | Result | Gate |
+|---|---:|---:|
+| RAGAS faithfulness | 1.000 | >= 0.750 |
+| Adversarial pass rate | 20/20 (100%) | >= 18/20 |
+| Total guard P95 | 0.06 ms | < 500 ms |
+| Cohen's kappa | -0.0714 | Track for judge calibration |
+| Dominant failure metric | context_precision | Review retrieval/reranking |
 
-## CI/CD Gates (phải pass trước khi merge to main)
+The Phase A aggregate average scores were factual 0.6733, multi_hop 0.5813, and adversarial 0.5896. Context precision was the weakest metric in every distribution, so retrieval filtering and reranking should be the first quality improvements.
 
-```yaml
-# .github/workflows/rag_eval.yml
-- name: RAGAS Quality Gate
-  run: python src/phase_a_ragas.py
-  env:
-    MIN_FAITHFULNESS: 0.75
-    MIN_AVG_SCORE: 0.65
+## Production Actions
 
-- name: Guardrail Gate
-  run: pytest tests/test_phase_c.py -k "test_adversarial_suite_pass_rate"
-  # phải ≥ 15/20 (75%)
+PII detections are rejected before retrieval and logged without storing the raw sensitive value. Input-rail decisions should include the rule that fired, while output-rail blocks should preserve only a redacted audit record. The negative Cohen kappa indicates that the offline heuristic judge is not yet reliable enough for an automated release gate; it should be calibrated against more human-labelled pairs before production use. A production deployment should also measure the RAG and output layers separately under representative API traffic.
 
-- name: Latency Gate
-  run: python -c "from src.phase_c_guard import measure_p95_latency; ..."
-  # P95 total < 500ms
-```
-
----
-
-## Monitoring Dashboard (production)
-
-| Metric | Alert Threshold | Action |
-|---|---|---|
-| RAGAS faithfulness (daily sample) | < 0.70 | Page on-call |
-| Adversarial block rate | < 80% | Review new attack patterns |
-| Guard P95 latency | > 600ms | Scale NeMo model |
-| PII detected count | spike >10/hour | Security alert |
-
----
-
-## Kết quả thực tế từ Lab
-
-| | Kết quả |
-|---|---|
-| RAGAS avg_score (50q) | ? |
-| Worst metric | ? |
-| Dominant failure distribution | ? |
-| Cohen's κ | ? |
-| Adversarial pass rate | ? / 20 |
-| Guard P95 latency | ? ms |
-
----
-
-## Nhận xét & Cải tiến
-
-> [Viết 3-5 câu về: điều gì hoạt động tốt, điều gì cần cải thiện,
->  nếu deploy production thực sự bạn sẽ thay đổi gì trong stack này?]

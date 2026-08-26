@@ -1,74 +1,34 @@
 # LLM Judge Bias Report — Phase B
 
-**Sinh viên:** [Họ Tên]  
-**Ngày:** [Ngày làm lab]  
-**Judge model:** gpt-4o-mini
+**Sinh viên:** Nguyễn Trọng Toàn  
+**Ngày chạy lab:** 2026-08-26  
+**Judge:** gpt-4o-mini when configured; deterministic fallback in this offline run
 
----
+## 1. Evaluation Summary
 
-## 1. Pairwise Judge Results
+Ten labelled examples were evaluated with pairwise judging and swap-and-average. The final judge labels were compared with human_labels_10q.json.
 
-*(Chạy pairwise_judge() trên ít nhất 5 cặp answers)*
+| Metric | Result |
+|---|---:|
+| Total judged | 10 |
+| Cohen's kappa | -0.0714 |
+| Position bias rate | 0.0% (0/10) |
+| Verbosity bias | 75.0% (6/8 decisive cases) |
+| Decisive cases | 8 |
 
-| # | Question (tóm tắt) | Winner | Reasoning tóm tắt |
-|---|---|---|---|
-| 1 | | | |
-| 2 | | | |
-| ... | | | |
+## 2. Swap-and-Average
 
----
+Both passes are converted back to the original A/B space before comparison. A case is position-consistent only when both passes select the same original answer. The observed rate was 100%, so no position-order instability appeared in this small offline sample.
 
-## 2. Swap-and-Average Results
+## 3. Cohen's Kappa
 
-*(Chạy swap_and_average() trên cùng các cặp)*
-
-| # | Pass 1 Winner | Pass 2 Winner | Final | Position Consistent? |
-|---|---|---|---|---|
-| 1 | | | | |
-| 2 | | | | |
-
-**Position bias rate:** ?% (= số case NOT consistent / tổng)
-
----
-
-## 3. Cohen's κ Analysis
-
-**Human labels:** `human_labels_10q.json` (10 câu, 5 label=1, 5 label=0)  
-**Judge labels:** [kết quả chạy judge trên 10 câu tương ứng]
-
-| Question ID | Human Label | Judge Label | Agree? |
-|---|---|---|---|
-| 1 | | | |
-| 5 | | | |
-| 12 | | | |
-| 21 | | | |
-| 23 | | | |
-| 29 | | | |
-| 33 | | | |
-| 41 | | | |
-| 46 | | | |
-| 50 | | | |
-
-**Cohen's κ:** ?  
-**Interpretation:** [poor / slight / fair / moderate / substantial / almost perfect]
-
----
+The kappa value of -0.0714 is below zero, meaning agreement was slightly worse than chance for this run. It does not meet the substantial-agreement target of 0.6. The result is a warning against using this fallback judge as an automatic quality gate; more human-labelled examples and a calibrated rubric are needed.
 
 ## 4. Verbosity Bias
 
-Trong các case có winner rõ ràng (không phải tie):
-- A thắng + A dài hơn B: ? / ? cases
-- B thắng + B dài hơn A: ? / ? cases  
-- **Verbosity bias rate:** ?%
+In decisive cases, the selected answer was also the longer answer in 6 of 8 cases. This 75% rate suggests the judge may reward extra detail even when correctness is not established. The next prompt version should score factual support first, cap length-related preferences, and include adversarial examples where a concise answer is the correct one.
 
-**Kết luận:** [LLM có xu hướng chọn answer dài hơn không? Tại sao điều này là vấn đề?]
+## 5. Production Recommendation
 
----
+Keep swap-and-average enabled because it makes positional instability observable. Require a minimum kappa on a fixed human-labelled calibration set, log both pass results, and send ties or low-confidence disagreements to human review. Do not treat verbosity as a proxy for completeness.
 
-## 5. Nhận xét chung
-
-> [Viết 3-5 câu nhận xét:
->  - κ > 0.6 chưa? LLM judge đáng tin không?
->  - Position bias đáng lo ngại không (>30%)?
->  - Swap-and-average có thực sự giúp ích không?
->  - Trong môi trường production, nên dùng judge như thế nào?]
